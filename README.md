@@ -1,4 +1,4 @@
-HighIronRanch.Cqrs.EventStore.MongoDb
+HighIronRanch.Cqrs.EventStore.Azure
 =====================================
 
 Add-ons for github.com/sbalkum/SimpleCQRS, a fork of github.com/tyronegroves/SimpleCQRS.
