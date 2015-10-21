@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using HighIronRanch.Azure;
+using HighIronRanch.Azure.TableStorage;
 using HighIronRanch.Cqrs.EventStore.Azure;
 using Machine.Specifications;
 using Microsoft.WindowsAzure.Storage.Table;
@@ -13,13 +14,10 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 	[Subject(typeof(AzureTableEventStore))]
 	public class AzureTableEventStoreSpecs
 	{
-		public class AppSettings : IAppSettings
+		public class AppSettings : IAzureTableSettings
 		{
-			public bool IsLiveEnvironment { get { return false; } }
 			protected static string connectionString = "UseDevelopmentStorage=true;";
 			public string AzureStorageConnectionString { get { return connectionString; } }
-			public string LeaseBlockName { get { return "TheIntegrationBlock"; }  }
-			public string DevLucenePath { get; set; }
 		}
 
 		public class when_inserting_a_domainevent

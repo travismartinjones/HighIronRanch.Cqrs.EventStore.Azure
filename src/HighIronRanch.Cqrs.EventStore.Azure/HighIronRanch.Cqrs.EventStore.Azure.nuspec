@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package >
+  <metadata>
+	<id>HighIronRanch.Cqrs.EventStore.Azure</id>
+	<version>$version$</version>
+    <title>$title$</title>
+    <authors>$author$</authors>
+    <owners>$author$</owners>
+	<licenseUrl>https://github.com/sbalkum/HighIronRanch.Cqrs.EventStore.Azure/blob/master/LICENSE</licenseUrl>
+	<projectUrl>https://github.com/sbalkum/HighIronRanch.Cqrs.EventStore.Azure</projectUrl>
+	<requireLicenseAcceptance>false</requireLicenseAcceptance>
+	<description>$description$</description>
+	<summary>An event store implementation for Azure table storage.</summary>
+	<copyright>$copyright$</copyright>
+  </metadata>
+  <files>
+<!--
+	<file src="bin\Release\HighIronRanch.Cqrs.EventStore.Azure.dll" target="lib\net45\HighIronRanch.Cqrs.EventStore.Azure.dll" />
+-->
+	<file src="bin\Release\HighIronRanch.Cqrs.EventStore.Azure.pdb" target="lib\net45\HighIronRanch.Cqrs.EventStore.Azure.pdb" />
+  </files>
+</package>

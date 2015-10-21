@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using HighIronRanch.Azure;
+using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
 using Newtonsoft.Json;
 using SimpleCqrs.Eventing;
@@ -24,6 +23,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
 		public class AzureDomainEvent : TableEntity
 		{
+            public DateTime EventDate { get; set; }
 			public string DomainEventAsJson { get; set; }
 			public string DomainEventTypeAsJson { get; set; }
 
@@ -33,6 +33,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 			{
 				PartitionKey = evt.AggregateRootId.ToString();
 				RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
+			    EventDate = evt.EventDate;
 				DomainEventAsJson = JsonConvert.SerializeObject(evt);
 				DomainEventTypeAsJson = JsonConvert.SerializeObject(evt.GetType());
 			}

@@ -30,8 +30,17 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="HighIronRanch.Azure">
-      <HintPath>..\PackagesMaintained\HighIronRanch.Azure\HighIronRanch.Azure.dll</HintPath>
+    <Reference Include="HighIronRanch.Azure, Version=1.0.0.2, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\HighIronRanch.Azure.1.0.0.2\lib\net45\HighIronRanch.Azure.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HighIronRanch.Azure.TableStorage, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\HighIronRanch.Azure.TableStorage.1.0.0.0\lib\net45\HighIronRanch.Azure.TableStorage.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="HighIronRanch.Core, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\HighIronRanch.Core.1.0.0.0\lib\net45\HighIronRanch.Core.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="Machine.Specifications">
       <HintPath>..\packages\Machine.Specifications.0.9.1\lib\net45\Machine.Specifications.dll</HintPath>
