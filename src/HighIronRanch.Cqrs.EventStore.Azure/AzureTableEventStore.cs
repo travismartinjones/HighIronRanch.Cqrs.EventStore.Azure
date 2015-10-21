@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
 using Newtonsoft.Json;
@@ -70,18 +71,23 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 			var table = _tableService.GetTable(_eventStoreTableName);
 
 			var batchOperation = new TableBatchOperation();
-			int i = 0;
-			foreach (var domainEvent in domainEvents)
+			int batchCount = 0;
+		    var currentAggregateRootId = Guid.Empty;
+
+			foreach (var domainEvent in domainEvents.OrderBy(de => de.EventDate))
 			{
-				if (i >= 100)
+				if (batchCount >= 100 || 
+                    (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0) )
 				{
 					table.ExecuteBatch(batchOperation);
-					i = 0;
+                    batchOperation = new TableBatchOperation();
+					batchCount = 0;
 				}
 				batchOperation.Insert(new AzureDomainEvent(domainEvent));
-				i++;
+			    currentAggregateRootId = domainEvent.AggregateRootId;
+				batchCount++;
 			}
-			if(i > 0)
+			if(batchCount > 0)
 				table.ExecuteBatch(batchOperation);
 		}
 

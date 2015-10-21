@@ -65,7 +65,63 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 			private static TestableAzureTableEventStore sut;
 		}
 
-		public class when_querying_the_eventstore
+	    public class when_inserting_multiple_domainevents
+	    {
+            protected static AppSettings appSettings;
+            protected static IAzureTableService tableService;
+            protected static string testTableName;
+            protected static DomainEvent testDomainEvent;
+            protected static DomainEvent testDomainEvent2;
+            protected static IList<DomainEvent> domainEvents;
+	        protected static int numEvents;
+
+            private Establish context = () =>
+            {
+                appSettings = new AppSettings();
+                testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
+                tableService = new AzureTableService(appSettings);
+                var table = tableService.GetTable(testTableName, false);
+                table.DeleteIfExists();
+
+                sut = new TestableAzureTableEventStore(tableService);
+                sut.EventStoreTableName = testTableName;
+
+                domainEvents = new List<DomainEvent>();
+                numEvents = 10;
+                for (int i = 0; i < numEvents; i++)
+                {
+                    domainEvents.Add(new DomainEvent()
+                    {
+                        AggregateRootId = Guid.NewGuid(),
+                        EventDate = DateTime.Now,
+                        Sequence = 99
+                    });
+                }
+            };
+
+            private Because of = () =>
+            {
+                sut.Insert(domainEvents);
+            };
+
+            private It should_have_all_events_in_table = () =>
+            {
+                var table = tableService.GetTable(testTableName);
+                var query = new TableQuery<AzureTableEventStore.AzureDomainEvent>();
+                var events = table.ExecuteQuery(query);
+                events.Count().ShouldEqual(numEvents);
+            };
+
+            private Cleanup after = () =>
+            {
+                var table = tableService.GetTable(testTableName, false);
+                table.DeleteIfExists();
+            };
+
+            private static TestableAzureTableEventStore sut;
+        }
+
+        public class when_querying_the_eventstore
 		{
 			protected static AppSettings appSettings;
 			protected static IAzureTableService tableService;
