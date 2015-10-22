@@ -8,102 +8,114 @@ using SimpleCqrs.Eventing;
 
 namespace HighIronRanch.Cqrs.EventStore.Azure
 {
-	public class AzureTableEventStore : IEventStore
-	{
-		public const string EVENT_STORE_TABLE_NAME = "Events";
-		public const string SEQUENCE_FORMAT_STRING = "0000000000";
+    public class AzureTableEventStore : IEventStore
+    {
+        public const string EVENT_STORE_TABLE_NAME = "Events";
+        public const string SEQUENCE_FORMAT_STRING = "0000000000";
 
-		protected readonly IAzureTableService _tableService;
-		protected string _eventStoreTableName; // Used so it can be overridden for tests
+        protected readonly IAzureTableService _tableService;
+        protected string _eventStoreTableName; // Used so it can be overridden for tests
 
-		public AzureTableEventStore(IAzureTableService tableService)
-		{
-			_tableService = tableService;
-			_eventStoreTableName = EVENT_STORE_TABLE_NAME;
-		}
+        public AzureTableEventStore(IAzureTableService tableService)
+        {
+            _tableService = tableService;
+            _eventStoreTableName = EVENT_STORE_TABLE_NAME;
+        }
 
-		public class AzureDomainEvent : TableEntity
-		{
+        public class AzureDomainEvent : TableEntity
+        {
             public DateTime EventDate { get; set; }
-			public string DomainEventAsJson { get; set; }
-			public string DomainEventTypeAsJson { get; set; }
+            public string DomainEventAsJson { get; set; }
+            public string DomainEventTypeAsJson { get; set; }
 
-			public AzureDomainEvent() { }
+            public AzureDomainEvent() { }
 
-			public AzureDomainEvent(DomainEvent evt)
-			{
-				PartitionKey = evt.AggregateRootId.ToString();
-				RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
-			    EventDate = evt.EventDate;
-				DomainEventAsJson = JsonConvert.SerializeObject(evt);
-				DomainEventTypeAsJson = JsonConvert.SerializeObject(evt.GetType());
-			}
-		}
+            public AzureDomainEvent(DomainEvent evt)
+            {
+                PartitionKey = evt.AggregateRootId.ToString();
+                RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
+                EventDate = evt.EventDate;
+                DomainEventAsJson = JsonConvert.SerializeObject(evt);
+                DomainEventTypeAsJson = JsonConvert.SerializeObject(evt.GetType());
+            }
 
-		public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
-		{
-			var table = _tableService.GetTable(_eventStoreTableName);
+            public long EstimatedSize => PartitionKey.Length +
+                                         RowKey.Length +
+                                         25 + // EventDate in ISO format
+                                         DomainEventAsJson.Length +
+                                         DomainEventTypeAsJson.Length;
+        }
 
-			var query = new TableQuery<AzureDomainEvent>()
-				.Where(TableQuery
-					.CombineFilters(
-						TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()),
-						TableOperators.And,
-						TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.GreaterThan, startSequence.ToString(SEQUENCE_FORMAT_STRING))
-					)
-				);
+        public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
+        {
+            var table = _tableService.GetTable(_eventStoreTableName);
 
-			var entities = table.ExecuteQuery(query);
+            var query = new TableQuery<AzureDomainEvent>()
+                .Where(TableQuery
+                    .CombineFilters(
+                        TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()),
+                        TableOperators.And,
+                        TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.GreaterThan, startSequence.ToString(SEQUENCE_FORMAT_STRING))
+                    )
+                );
 
-			var list = new List<DomainEvent>();
-			foreach (var entity in entities)
-			{
-				var type = JsonConvert.DeserializeObject<Type>(entity.DomainEventTypeAsJson);
-				var evt = JsonConvert.DeserializeObject(entity.DomainEventAsJson, type) as DomainEvent;
-				list.Add(evt);
-			}
+            var entities = table.ExecuteQuery(query);
 
-			return list;
-		}
+            var list = new List<DomainEvent>();
+            foreach (var entity in entities)
+            {
+                var type = JsonConvert.DeserializeObject<Type>(entity.DomainEventTypeAsJson);
+                var evt = JsonConvert.DeserializeObject(entity.DomainEventAsJson, type) as DomainEvent;
+                list.Add(evt);
+            }
 
-		public void Insert(IEnumerable<DomainEvent> domainEvents)
-		{
-			var table = _tableService.GetTable(_eventStoreTableName);
+            return list;
+        }
 
-			var batchOperation = new TableBatchOperation();
-			int batchCount = 0;
-		    var currentAggregateRootId = Guid.Empty;
+        public void Insert(IEnumerable<DomainEvent> domainEvents)
+        {
+            var table = _tableService.GetTable(_eventStoreTableName);
 
-			foreach (var domainEvent in domainEvents.OrderBy(de => de.EventDate))
-			{
-				if (batchCount >= 100 || 
-                    (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0) )
-				{
-					table.ExecuteBatch(batchOperation);
+            var batchOperation = new TableBatchOperation();
+            int batchCount = 0;
+            long batchSize = 0;
+            var currentAggregateRootId = Guid.Empty;
+
+            foreach (var domainEvent in domainEvents.OrderBy(de => de.EventDate))
+            {
+                // Azure batches limited to 100 and 4MB
+                if (batchCount >= 100 ||
+                    batchSize >= 3900000 || // give ~10% buffer
+                    (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0))
+                {
+                    table.ExecuteBatch(batchOperation);
                     batchOperation = new TableBatchOperation();
-					batchCount = 0;
-				}
-				batchOperation.Insert(new AzureDomainEvent(domainEvent));
-			    currentAggregateRootId = domainEvent.AggregateRootId;
-				batchCount++;
-			}
-			if(batchCount > 0)
-				table.ExecuteBatch(batchOperation);
-		}
+                    batchCount = 0;
+                    batchSize = 0;
+                }
+                var azureDomainEvent = new AzureDomainEvent(domainEvent);
+                batchSize += azureDomainEvent.EstimatedSize;
+                batchOperation.Insert(azureDomainEvent);
+                currentAggregateRootId = domainEvent.AggregateRootId;
+                batchCount++;
+            }
+            if (batchCount > 0)
+                table.ExecuteBatch(batchOperation);
+        }
 
-		public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
-		{
-			throw new NotImplementedException();
-		}
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
+        {
+            throw new NotImplementedException();
+        }
 
-		public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
-		{
-			throw new NotImplementedException();
-		}
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
+        {
+            throw new NotImplementedException();
+        }
 
-		public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
-		{
-			throw new NotImplementedException();
-		}
-	}
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
+        {
+            throw new NotImplementedException();
+        }
+    }
 }
