@@ -37,6 +37,11 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 EventDate = evt.EventDate;
                 DomainEventAsJson = JsonConvert.SerializeObject(evt);
                 DomainEventTypeAsJson = JsonConvert.SerializeObject(evt.GetType());
+
+                if (DomainEventAsJson.Length > 32767)
+                {
+                    throw new ArgumentException(string.Format("Event size of {0} when stored as json exceeds Azure property limit of 64K", DomainEventAsJson.Length));
+                }
             }
 
             public long EstimatedSize => PartitionKey.Length +
@@ -84,7 +89,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             foreach (var domainEvent in domainEvents.OrderBy(de => de.EventDate))
             {
                 // Azure batches limited to 100 and 4MB
-                if (batchCount >= 100 ||
+                if (batchCount >= 1 ||
                     batchSize >= 3900000 || // give ~10% buffer
                     (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0))
                 {
