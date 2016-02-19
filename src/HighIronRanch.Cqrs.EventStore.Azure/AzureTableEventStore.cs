@@ -26,7 +26,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         /// <summary>This entity is basically a workaround the 64KB limitation
         /// for entity properties. 15 properties represents a total storage
-        /// capability of 960KB (entity limit is at 1024KB).</summary>        
+        /// capability of 896KB (entity limit is at 1024KB).</summary>        
         /// <remarks>        
         /// This class is basically a hack against the Table Storage
         /// to work-around the 64KB limitation for properties.
@@ -37,13 +37,14 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {            
             /// <summary>
             /// Maximal entity size is 1MB. Out of that, we keep only
-            /// 960kb (1MB - 64kb as a safety margin). Then, it should be taken
+            /// 896kb (1MB - 64kb as a safety margin). Then, it should be taken
             /// into account that byte[] are Base64 encoded which represent
             /// a penalty overhead of 4/3 - hence the reduced capacity.
             /// </summary>
-            public const int MaxByteCapacity = (960 * 1024 * 3) / 4;
+            public const int MaxByteCapacity = (896 * 1024 * 3) / 4;
 
             public DateTime EventDate { get; set; }
+            public string EventType { get; set; }
             public byte[] P0 { get; set; }
             public byte[] P1 { get; set; }
             public byte[] P2 { get; set; }
@@ -57,8 +58,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             public byte[] P10 { get; set; }
             public byte[] P11 { get; set; }
             public byte[] P12 { get; set; }
-            public byte[] P13 { get; set; }
-            public byte[] P14 { get; set; }
+            public byte[] P13 { get; set; }            
 
             IEnumerable<byte[]> GetProperties()
             {
@@ -76,7 +76,6 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 if (null != P11) yield return P11;
                 if (null != P12) yield return P12;
                 if (null != P13) yield return P13;
-                if (null != P14) yield return P14;
             }            
 
             public AzureDomainEvent() { }
@@ -86,6 +85,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 PartitionKey = evt.AggregateRootId.ToString();
                 RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
                 EventDate = evt.EventDate;
+                EventType = JsonConvert.SerializeObject(evt.GetType().FullName);
               
                 var domainEventJson = JsonConvert.SerializeObject(evt);
 
@@ -137,10 +137,9 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                     b => P11 = b,
                     b => P12 = b,
                     b => P13 = b,
-                    b => P14 = b,
                     };
 
-                for (var i = 0; i < 15; i++)
+                for (var i = 0; i < 14; i++)
                 {
                     if (i * 64 * 1024 < data.Length)
                     {
@@ -158,10 +157,10 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 }
             }
 
-
             public long EstimatedSize => PartitionKey.Length +
                                          RowKey.Length +
                                          25 + // EventDate in ISO format
+                                         EventType.Length +
                                          (GetProperties().Sum(a => a.Length) * 4 + 3) / 3;
         }
 
@@ -178,16 +177,19 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                     )
                 );
 
-            var entities = table.ExecuteQuery(query);
+            return ConvertToDomainEvent(table.ExecuteQuery(query));            
+        }
 
+        private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
+        {
             var list = new List<DomainEvent>();
-            foreach (var entity in entities)
+            foreach (var entity in events)
             {
                 using (var stream = new MemoryStream(entity.GetData()) { Position = 0 })
                 {
                     var val = JsonConvert.DeserializeObject<DomainEvent>(Encoding.UTF8.GetString(stream.ToArray()));
                     list.Add(val);
-                }                
+                }
             }
 
             return list;
@@ -226,17 +228,39 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
         {
-            throw new NotImplementedException();
+            return domainEventTypes.SelectMany(x =>
+            {
+                var jsonDomainEventType = JsonConvert.SerializeObject(x.FullName);
+                var domainEvents =_tableService.GetTable(_eventStoreTableName)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.EventType == jsonDomainEventType);
+                return ConvertToDomainEvent(domainEvents);
+            });
         }
 
         public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
         {
-            throw new NotImplementedException();
+            return domainEventTypes.SelectMany(x =>
+            {
+                var partitionKey = aggregateRootId.ToString();
+                var jsonDomainEventType = JsonConvert.SerializeObject(x.FullName);
+                var domainEvents = _tableService.GetTable(_eventStoreTableName)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
+                return ConvertToDomainEvent(domainEvents);
+            });
         }
 
         public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
         {
-            throw new NotImplementedException();
+            return domainEventTypes.SelectMany(x =>
+            {
+                var jsonDomainEventType = JsonConvert.SerializeObject(x.FullName);
+                var domainEvents = _tableService.GetTable(_eventStoreTableName)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
+                return ConvertToDomainEvent(domainEvents);
+            });
         }
     }
 }
