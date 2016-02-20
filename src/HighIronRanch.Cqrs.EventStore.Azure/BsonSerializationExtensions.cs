@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Bson;
@@ -18,14 +19,19 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return ms.ToArray();
         }
 
-        public static T FromBson<T>(this byte[] bson)
+        public static object FromBson(this byte[] bson, Type type)
         {
             var ms = new MemoryStream(bson);
-            using(var reader = new BsonReader(ms))
+            using (var reader = new BsonReader(ms))
             {
                 var serializer = new JsonSerializer();
-                return serializer.Deserialize<T>(reader);
+                return serializer.Deserialize(reader, type);
             }
+        }
+
+        public static T FromBson<T>(this byte[] bson)
+        {
+            return (T)FromBson(bson, typeof (T));
         }
     }
 }

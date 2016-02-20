@@ -25,7 +25,7 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 			protected static AppSettings appSettings;
 			protected static IAzureTableService tableService;
 			protected static string testTableName;
-			protected static DomainEvent testDomainEvent;
+			protected static DomainEventWithData testDomainEvent;
 			protected static IEnumerable<DomainEvent> domainEvents;
 
 			private Establish context = () =>
@@ -39,7 +39,7 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 				sut = new TestableAzureTableEventStore(tableService);
 				sut.EventStoreTableName = testTableName;
 
-				testDomainEvent = new DomainEvent() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99 };
+				testDomainEvent = new DomainEventWithData { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99, Id = Guid.NewGuid()};
 				domainEvents = new List<DomainEvent>() { testDomainEvent };
 			};
 
@@ -56,12 +56,26 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 				events.Count().ShouldEqual(1);
 			};
 
-			private Cleanup after = () =>
+            private It should_save_the_information_as_it_was_provided = () =>
+            {
+                var deserializedEvent = (DomainEventWithData)sut.GetEvents(testDomainEvent.AggregateRootId, 0).FirstOrDefault();
+                deserializedEvent.ShouldNotBeNull();
+                deserializedEvent.AggregateRootId.ShouldEqual(testDomainEvent.AggregateRootId);
+                deserializedEvent.EventDate.ToString().ShouldEqual(testDomainEvent.EventDate.ToString());
+                deserializedEvent.Sequence.ShouldEqual(testDomainEvent.Sequence);
+                deserializedEvent.Id.ShouldEqual(testDomainEvent.Id);
+            };
+
+            private Cleanup after = () =>
 			{
 				var table = tableService.GetTable(testTableName, false);
 				table.DeleteIfExists();
 			};
 
+		    protected class DomainEventWithData : DomainEvent
+		    {
+		        public Guid Id { get; set; }
+		    }
 			private static TestableAzureTableEventStore sut;
 		}
 

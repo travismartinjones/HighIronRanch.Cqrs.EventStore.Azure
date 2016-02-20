@@ -46,7 +46,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 PartitionKey = evt.AggregateRootId.ToString();
                 RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
                 EventDate = evt.EventDate;
-                EventType = evt.GetType().FullName;
+                EventType = evt.GetType().AssemblyQualifiedName;
                               
                 var domainEventData = evt.ToBson();
                 
@@ -72,14 +72,15 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                     )
                 );
 
-            return ConvertToDomainEvent(table.ExecuteQuery(query));            
+            var ret = ConvertToDomainEvent(table.ExecuteQuery(query));
+            return ret;
         }
 
         private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
-            return events.Select(entity => entity.GetData().FromBson<DomainEvent>());
+            return events.Select(entity => entity.GetData().FromBson(Type.GetType(entity.EventType)) as DomainEvent);
         }
-
+        
         public void Insert(IEnumerable<DomainEvent> domainEvents)
         {
             var table = _tableService.GetTable(_eventStoreTableName);
@@ -110,6 +111,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 }
 
                 var azureDomainEvent = new AzureDomainEvent(domainEvent);
+
                 batchSize += azureDomainEvent.EstimatedSize;
                 batchOperation.Insert(azureDomainEvent);
                 currentAggregateRootId = domainEvent.AggregateRootId;
@@ -124,7 +126,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             return domainEventTypes.SelectMany(x =>
             {
-                var jsonDomainEventType = x.FullName;
+                var jsonDomainEventType = x.AssemblyQualifiedName;
                 var domainEvents =_tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType);
@@ -137,7 +139,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var partitionKey = aggregateRootId.ToString();
-                var jsonDomainEventType = x.FullName;
+                var jsonDomainEventType = x.AssemblyQualifiedName;
                 var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
@@ -149,7 +151,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             return domainEventTypes.SelectMany(x =>
             {
-                var jsonDomainEventType = x.FullName;
+                var jsonDomainEventType = x.AssemblyQualifiedName;
                 var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
