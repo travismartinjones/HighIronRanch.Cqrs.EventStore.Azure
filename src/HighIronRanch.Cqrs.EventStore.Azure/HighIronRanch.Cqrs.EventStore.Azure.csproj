@@ -83,6 +83,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AzureTableEventStore.cs" />
+    <Compile Include="AzureTableSnapshotStore.cs" />
+    <Compile Include="BsonPayloadTableEntity.cs" />
+    <Compile Include="BsonSerializationExtensions.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
