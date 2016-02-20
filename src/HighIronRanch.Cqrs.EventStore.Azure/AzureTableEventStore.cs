@@ -2,6 +2,8 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
@@ -46,7 +48,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 PartitionKey = evt.AggregateRootId.ToString();
                 RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
                 EventDate = evt.EventDate;
-                EventType = evt.GetType().AssemblyQualifiedName;
+                EventType = evt.GetType().FullName;
                               
                 var domainEventData = evt.ToBson();
                 
@@ -78,7 +80,40 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
-            return events.Select(entity => entity.GetData().FromBson(Type.GetType(entity.EventType)) as DomainEvent);
+            return events.Select(entity => entity.GetData().FromBson(GetDomainEventType(entity.EventType)) as DomainEvent);
+        }
+
+        private Type GetDomainEventType(string typeName)
+        {
+            Type type;
+            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            var firstDotIndex = typeName.IndexOf('.');
+
+            if (firstDotIndex > 0)
+            {
+                // the type most likely lives inside an assembly with a similar namespace
+                // by looking at these first, we can skip any external assemblies
+
+                var firstNamespacePart = typeName.Substring(0, firstDotIndex);
+                foreach (var assembly in assemblies.Where(assembly => assembly.FullName.StartsWith(firstNamespacePart)))
+                {
+                    type = assembly.GetType(typeName);
+
+                    if (type != null)
+                        return type;
+                }
+            }
+
+            // we were unable to find the type in an assembly with a similar namespace
+            // as a fallback, scan every assembly to make a type match
+            foreach (var assembly in assemblies)
+            {
+                type = assembly.GetType(typeName);
+                if (type != null)
+                    return type;
+            }
+
+            return null;
         }
         
         public void Insert(IEnumerable<DomainEvent> domainEvents)
@@ -126,7 +161,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             return domainEventTypes.SelectMany(x =>
             {
-                var jsonDomainEventType = x.AssemblyQualifiedName;
+                var jsonDomainEventType = x.FullName;
                 var domainEvents =_tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType);
@@ -139,7 +174,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var partitionKey = aggregateRootId.ToString();
-                var jsonDomainEventType = x.AssemblyQualifiedName;
+                var jsonDomainEventType = x.FullName;
                 var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
@@ -151,7 +186,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             return domainEventTypes.SelectMany(x =>
             {
-                var jsonDomainEventType = x.AssemblyQualifiedName;
+                var jsonDomainEventType = x.FullName;
                 var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
