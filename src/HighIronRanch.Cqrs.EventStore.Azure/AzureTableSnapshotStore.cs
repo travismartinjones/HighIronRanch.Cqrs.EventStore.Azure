@@ -9,14 +9,18 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 {
     public class AzureTableSnapshotStore : ISnapshotStore
     {
-        public const string EVENT_STORE_TABLE_NAME = "Snapshots";        
+        public const string EVENT_STORE_TABLE_NAME = "Snapshots";
 
         protected readonly IAzureTableService _tableService;
+        private readonly IDomainEntityTypeBuilder _domainEntityTypeBuilder;
         protected string _eventStoreTableName; // Used so it can be overridden for tests
         
-        public AzureTableSnapshotStore(IAzureTableService tableService)
+        public AzureTableSnapshotStore(
+            IAzureTableService tableService,
+            IDomainEntityTypeBuilder domainEntityTypeBuilder)
         {
             _tableService = tableService;
+            _domainEntityTypeBuilder = domainEntityTypeBuilder;
             _eventStoreTableName = EVENT_STORE_TABLE_NAME;
         }
 
@@ -29,7 +33,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
             var azureSnapshot = table.ExecuteQuery(query).FirstOrDefault();
 
-            return azureSnapshot?.GetData().FromBson<Snapshot>();            
+            return azureSnapshot?.GetData().FromBson(_domainEntityTypeBuilder.Build(azureSnapshot.RowKey)) as Snapshot;
         }
 
         public void SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
@@ -39,7 +43,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         }
 
         public class AzureSnapshot : BsonPayloadTableEntity
-        {
+        {            
             protected override int AdditionalPropertySizes => 0;
 
             public AzureSnapshot() { }
@@ -47,8 +51,8 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             public AzureSnapshot(Snapshot snapshot)
             {
                 PartitionKey = snapshot.AggregateRootId.ToString();
-                RowKey = "";
-                
+                RowKey = snapshot.GetType().FullName;                
+
                 var snapshotData = snapshot.ToBson();
 
                 if (snapshotData.Length > MaxByteCapacity)

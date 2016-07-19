@@ -342,7 +342,7 @@ namespace HighIronRanch.Cqrs.Azure.Tests.Integration
 
 	public class TestableAzureTableEventStore : AzureTableEventStore
 	{
-		public TestableAzureTableEventStore(IAzureTableService tableService) : base(tableService)
+		public TestableAzureTableEventStore(IAzureTableService tableService) : base(tableService, new DomainEntityTypeBuilder())
 		{ }
 
 		public string EventStoreTableName { get { return _eventStoreTableName; } set { _eventStoreTableName = value; } }

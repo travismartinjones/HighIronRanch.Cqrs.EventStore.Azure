@@ -17,11 +17,15 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         public const string SEQUENCE_FORMAT_STRING = "0000000000";
 
         protected readonly IAzureTableService _tableService;
+        private readonly IDomainEntityTypeBuilder _domainEntityTypeBuilder;
         protected string _eventStoreTableName; // Used so it can be overridden for tests
 
-        public AzureTableEventStore(IAzureTableService tableService)
+        public AzureTableEventStore(
+            IAzureTableService tableService,
+            IDomainEntityTypeBuilder domainEntityTypeBuilder)
         {
             _tableService = tableService;
+            _domainEntityTypeBuilder = domainEntityTypeBuilder;
             _eventStoreTableName = EVENT_STORE_TABLE_NAME;
         }        
 
@@ -80,40 +84,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
-            return events.Select(entity => entity.GetData().FromBson(GetDomainEventType(entity.EventType)) as DomainEvent);
-        }
-
-        private Type GetDomainEventType(string typeName)
-        {
-            Type type;
-            var assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            var firstDotIndex = typeName.IndexOf('.');
-
-            if (firstDotIndex > 0)
-            {
-                // the type most likely lives inside an assembly with a similar namespace
-                // by looking at these first, we can skip any external assemblies
-
-                var firstNamespacePart = typeName.Substring(0, firstDotIndex);
-                foreach (var assembly in assemblies.Where(assembly => assembly.FullName.StartsWith(firstNamespacePart)))
-                {
-                    type = assembly.GetType(typeName);
-
-                    if (type != null)
-                        return type;
-                }
-            }
-
-            // we were unable to find the type in an assembly with a similar namespace
-            // as a fallback, scan every assembly to make a type match
-            foreach (var assembly in assemblies)
-            {
-                type = assembly.GetType(typeName);
-                if (type != null)
-                    return type;
-            }
-
-            return null;
+            return events.Select(entity => entity.GetData().FromBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
         }
         
         public void Insert(IEnumerable<DomainEvent> domainEvents)
