@@ -51,7 +51,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             {   
                 PartitionKey = evt.AggregateRootId.ToString();
                 RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
-                EventDate = evt.EventDate;
+                EventDate = evt.EventDate.ToUniversalTime();
                 EventType = evt.GetType().FullName;
                               
                 var domainEventData = evt.ToBson();

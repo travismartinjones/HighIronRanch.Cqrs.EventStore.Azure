@@ -9,23 +9,27 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
     {
         public static byte[] ToBson(this object entity)
         {
-            var ms = new MemoryStream();
-            using(var writer = new BsonWriter(ms))
-            {
-                var serializer = new JsonSerializer();
-                serializer.Serialize(writer, entity);
+            using (var ms = new MemoryStream())
+            { 
+                using (var writer = new BsonWriter(ms))
+                {
+                    var serializer = new JsonSerializer {DateTimeZoneHandling = DateTimeZoneHandling.Utc};
+                    serializer.Serialize(writer, entity);
+                }
+
+                return ms.ToArray();
             }
-            
-            return ms.ToArray();
-        }
+    }
 
         public static object FromBson(this byte[] bson, Type type)
         {
-            var ms = new MemoryStream(bson);
-            using (var reader = new BsonReader(ms))
+            using (var ms = new MemoryStream(bson))
             {
-                var serializer = new JsonSerializer();
-                return serializer.Deserialize(reader, type);
+                using (var reader = new BsonReader(ms))
+                {
+                    var serializer = new JsonSerializer { DateTimeZoneHandling = DateTimeZoneHandling.Utc };
+                    return serializer.Deserialize(reader, type);
+                }
             }
         }
 
