@@ -26,7 +26,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public Snapshot GetSnapshot(Guid aggregateRootId)
         {
-            var table = _tableService.GetTable(_eventStoreTableName);
+            var table = _tableService.GetTable(_eventStoreTableName, false);
 
             var query = new TableQuery<AzureSnapshot>()
                 .Where(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal,aggregateRootId.ToString()));
@@ -38,7 +38,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public void SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
         {
-            var table = _tableService.GetTable(_eventStoreTableName);            
+            var table = _tableService.GetTable(_eventStoreTableName, false);            
             table.Execute(TableOperation.InsertOrReplace(new AzureSnapshot(snapshot)));            
         }
 
