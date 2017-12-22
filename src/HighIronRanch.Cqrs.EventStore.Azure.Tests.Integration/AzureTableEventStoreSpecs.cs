@@ -1,350 +1,168 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.IO;
 using System.Linq;
-using HighIronRanch.Azure;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using HighIronRanch.Azure.TableStorage;
-using HighIronRanch.Cqrs.EventStore.Azure;
-using Machine.Specifications;
 using Microsoft.WindowsAzure.Storage.Table;
 using SimpleCqrs.Eventing;
 
-namespace HighIronRanch.Cqrs.Azure.Tests.Integration
+namespace HighIronRanch.Cqrs.EventStore.Azure
 {
-	[Subject(typeof(AzureTableEventStore))]
-	public class AzureTableEventStoreSpecs
-	{
-		public class AppSettings : IAzureTableSettings
-		{
-			protected static string ConnectionString = "UseDevelopmentStorage=true;";
-			public string AzureStorageConnectionString => ConnectionString;
-		}
+    public class AzureTableEventStore : IEventStore
+    {
+        public const string EVENT_STORE_TABLE_NAME = "Events";
+        public const string SEQUENCE_FORMAT_STRING = "0000000000";
 
-		public class when_inserting_a_domainevent
-		{
-			protected static AppSettings appSettings;
-			protected static IAzureTableService tableService;
-			protected static string testTableName;
-			protected static DomainEventWithData testDomainEvent;
-			protected static IEnumerable<DomainEvent> domainEvents;
+        protected readonly IAzureTableService _tableService;
+        private readonly IDomainEntityTypeBuilder _domainEntityTypeBuilder;
+        protected string _eventStoreTableName; // Used so it can be overridden for tests
 
-			private Establish context = () =>
-			{
-				appSettings = new AppSettings();
-				testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-				tableService = new AzureTableService(appSettings);
-				var table = tableService.GetTable(testTableName, false);
-				table.DeleteIfExists();
+        public AzureTableEventStore(
+            IAzureTableService tableService,
+            IDomainEntityTypeBuilder domainEntityTypeBuilder)
+        {
+            _tableService = tableService;
+            _domainEntityTypeBuilder = domainEntityTypeBuilder;
+            _eventStoreTableName = EVENT_STORE_TABLE_NAME;
+        }
 
-				sut = new TestableAzureTableEventStore(tableService);
-				sut.EventStoreTableName = testTableName;
+        /// <summary>This entity is basically a workaround the 64KB limitation
+        /// for entity properties. 15 properties represents a total storage
+        /// capability of 896KB (entity limit is at 1024KB).</summary>        
+        /// <remarks>        
+        /// This class is basically a hack against the Table Storage
+        /// to work-around the 64KB limitation for properties.
+        /// Idea adapted from the Locad Cloud Storage project.
+        /// https://github.com/Lokad/lokad-cloud-storage/blob/master/Source/Lokad.Cloud.Storage/Azure/FatEntity.cs
+        /// </remarks>
+        public class AzureDomainEvent : BsonPayloadTableEntity
+        {
+            private const int EventDateInIsoFormatSize = 25;
+            public DateTime EventDate { get; set; }
+            public string EventType { get; set; }
+            protected override int AdditionalPropertySizes => EventDateInIsoFormatSize + EventType.Length;
 
-				testDomainEvent = new DomainEventWithData { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99, Id = Guid.NewGuid()};
-				domainEvents = new List<DomainEvent>() { testDomainEvent };
-			};
+            public AzureDomainEvent() { }
 
-			private Because of = () =>
-			{
-				sut.Insert(domainEvents);
-			};
-
-			private It should_have_one_event_in_table = () =>
-			{
-				var table = tableService.GetTable(testTableName);
-				var query = new TableQuery<AzureTableEventStore.AzureDomainEvent>();
-				var events = table.ExecuteQuery(query);
-				events.Count().ShouldEqual(1);
-			};
-
-            private It should_save_the_information_as_it_was_provided = () =>
+            public AzureDomainEvent(DomainEvent evt)
             {
-                var deserializedEvent = (DomainEventWithData)sut.GetEvents(testDomainEvent.AggregateRootId, 0).FirstOrDefault();
-                deserializedEvent.ShouldNotBeNull();
-                deserializedEvent.AggregateRootId.ShouldEqual(testDomainEvent.AggregateRootId);
-                deserializedEvent.EventDate.ToString().ShouldEqual(testDomainEvent.EventDate.ToString());
-                deserializedEvent.Sequence.ShouldEqual(testDomainEvent.Sequence);
-                deserializedEvent.Id.ShouldEqual(testDomainEvent.Id);
-            };
+                PartitionKey = evt.AggregateRootId.ToString();
+                RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
+                EventDate = evt.EventDate.ToUniversalTime();
+                EventType = evt.GetType().FullName;
 
-            private Cleanup after = () =>
-			{
-				var table = tableService.GetTable(testTableName, false);
-				table.DeleteIfExists();
-			};
+                var domainEventData = evt.ToBson();
 
-		    protected class DomainEventWithData : DomainEvent
-		    {
-		        public Guid Id { get; set; }
-		    }
-			private static TestableAzureTableEventStore sut;
-		}
-
-	    public class when_inserting_multiple_domainevents
-	    {
-            protected static AppSettings appSettings;
-            protected static IAzureTableService tableService;
-            protected static string testTableName;
-            protected static DomainEvent testDomainEvent;
-            protected static DomainEvent testDomainEvent2;
-            protected static IList<DomainEvent> domainEvents;
-	        protected static int numEvents;
-
-            private Establish context = () =>
-            {
-                appSettings = new AppSettings();
-                testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-                tableService = new AzureTableService(appSettings);
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-
-                sut = new TestableAzureTableEventStore(tableService);
-                sut.EventStoreTableName = testTableName;
-
-                domainEvents = new List<DomainEvent>();
-                numEvents = 10;
-                for (int i = 0; i < numEvents; i++)
+                if (domainEventData.Length > MaxByteCapacity)
                 {
-                    domainEvents.Add(new DomainEvent()
-                    {
-                        AggregateRootId = Guid.NewGuid(),
-                        EventDate = DateTime.Now,
-                        Sequence = 99
-                    });
+                    throw new ArgumentException($"Event size of {domainEventData.Length} when stored as json exceeds Azure property limit of 960K");
                 }
-            };
 
-            private Because of = () =>
-            {
-                sut.Insert(domainEvents);
-            };
-
-            private It should_have_all_events_in_table = () =>
-            {
-                var table = tableService.GetTable(testTableName);
-                var query = new TableQuery<AzureTableEventStore.AzureDomainEvent>();
-                var events = table.ExecuteQuery(query);
-                events.Count().ShouldEqual(numEvents);
-            };
-
-            private Cleanup after = () =>
-            {
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-            };
-
-            private static TestableAzureTableEventStore sut;
+                SetData(domainEventData);
+            }
         }
 
-        public class when_querying_the_eventstore
-		{
-			protected static AppSettings appSettings;
-			protected static IAzureTableService tableService;
-			protected static string testTableName;
-			protected static DomainEvent testDomainEvent;
-			protected static IEnumerable<DomainEvent> results;
-
-			private Establish context = () =>
-			{
-				appSettings = new AppSettings();
-				testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-				tableService = new AzureTableService(appSettings);
-				var table = tableService.GetTable(testTableName, false);
-				table.DeleteIfExists();
-
-				sut = new TestableAzureTableEventStore(tableService);
-				sut.EventStoreTableName = testTableName;
-
-				testDomainEvent = new DomainEvent() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99 };
-				var domainEvents = new List<DomainEvent>() { testDomainEvent };
-				sut.Insert(domainEvents);
-			};
-
-			private Because of = () =>
-			{
-				results = sut.GetEvents(testDomainEvent.AggregateRootId, 0);
-			};
-
-			private It should_have_one_event_in_table = () =>
-			{
-				results.Count().ShouldEqual(1);
-				results.FirstOrDefault().AggregateRootId.ShouldEqual(testDomainEvent.AggregateRootId);
-			};
-
-			private Cleanup after = () =>
-			{
-				var table = tableService.GetTable(testTableName, false);
-				table.DeleteIfExists();
-			};
-
-			private static TestableAzureTableEventStore sut;
-		}
-
-        public class when_querying_the_eventstore_for_event_types
+        public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
         {
-            protected static AppSettings appSettings;
-            protected static IAzureTableService tableService;
-            protected static string testTableName;
-            protected static DomainEvent testDomainEvent;
-            protected static IEnumerable<DomainEvent> results;
+            var table = _tableService.GetTable(_eventStoreTableName, false);
 
-            private Establish context = () =>
-            {
-                appSettings = new AppSettings();
-                testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-                tableService = new AzureTableService(appSettings);
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
+            var query = new TableQuery<AzureDomainEvent>()
+                .Where(TableQuery
+                    .CombineFilters(
+                        TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()),
+                        TableOperators.And,
+                        TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.GreaterThan, startSequence.ToString(SEQUENCE_FORMAT_STRING))
+                    )
+                );
 
-                sut = new TestableAzureTableEventStore(tableService);
-                sut.EventStoreTableName = testTableName;
-                
-                var domainEvents = new List<DomainEvent>()
-                {
-                    new DomainEvent1() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99 },
-                    new DomainEvent2() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 100 },
-                    new DomainEvent3() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 101 },
-                };
-                sut.Insert(domainEvents);
-            };
-
-            private Because of = () =>
-            {
-                results = sut.GetEventsByEventTypes(new [] {typeof(DomainEvent1), typeof(DomainEvent3)});
-            };
-
-            private It should_pull_back_only_matching_event_types = () =>
-            {
-                results.Count().ShouldEqual(2);
-                results.FirstOrDefault().Sequence.ShouldEqual(99);
-                results.LastOrDefault().Sequence.ShouldEqual(101);
-            };
-
-            private Cleanup after = () =>
-            {
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-            };
-
-            private static TestableAzureTableEventStore sut;
+            var ret = ConvertToDomainEvent(table.ExecuteQuery(query));
+            return ret;
         }
 
-        public class when_querying_the_eventstore_for_event_types_by_aggregate_root_id
+        private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
-            protected static AppSettings appSettings;
-            protected static IAzureTableService tableService;
-            protected static string testTableName;
-            protected static DomainEvent testDomainEvent;
-            protected static IEnumerable<DomainEvent> results;
-            protected static Guid aggregateRootId;
-
-            private Establish context = () =>
-            {
-                appSettings = new AppSettings();
-                testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-                tableService = new AzureTableService(appSettings);
-                var table = tableService.GetTable(testTableName, false);
-                aggregateRootId = Guid.NewGuid();
-                table.DeleteIfExists();
-
-                sut = new TestableAzureTableEventStore(tableService);
-                sut.EventStoreTableName = testTableName;
-
-                var domainEvents = new List<DomainEvent>()
-                {
-                    new DomainEvent1() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 99 },
-                    new DomainEvent2() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 100 },
-                    new DomainEvent3() { AggregateRootId = Guid.NewGuid(), EventDate = DateTime.Now, Sequence = 101 },
-                    new DomainEvent1() { AggregateRootId = aggregateRootId, EventDate = DateTime.Now, Sequence = 102 },
-                    new DomainEvent2() { AggregateRootId = aggregateRootId, EventDate = DateTime.Now, Sequence = 103 },
-                    new DomainEvent3() { AggregateRootId = aggregateRootId, EventDate = DateTime.Now, Sequence = 104 },
-                };
-                sut.Insert(domainEvents);
-            };
-
-            private Because of = () =>
-            {
-                results = sut.GetEventsByEventTypes(new[] { typeof(DomainEvent1), typeof(DomainEvent3) }, aggregateRootId);
-            };
-
-            private It should_pull_back_only_matching_event_types_and_id = () =>
-            {
-                results.Count().ShouldEqual(2);
-                results.FirstOrDefault().Sequence.ShouldEqual(102);
-                results.LastOrDefault().Sequence.ShouldEqual(104);
-            };
-
-            private Cleanup after = () =>
-            {
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-            };
-
-            private static TestableAzureTableEventStore sut;
+            return events.Select(entity => entity.GetData().FromBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
         }
 
-        public class when_querying_the_eventstore_for_event_types_by_date_range
+        public void Insert(IEnumerable<DomainEvent> domainEvents)
         {
-            protected static AppSettings appSettings;
-            protected static IAzureTableService tableService;
-            protected static string testTableName;
-            protected static DomainEvent testDomainEvent;
-            protected static IEnumerable<DomainEvent> results;
-            protected static Guid aggregateRootId;
+            var table = _tableService.GetTable(_eventStoreTableName, false);
 
-            private Establish context = () =>
+            var batchOperation = new TableBatchOperation();
+            var batchCount = 0;
+            var batchSize = 0L;
+            var currentAggregateRootId = Guid.Empty;
+
+            var sortedEvents = domainEvents
+                                    // sort by the aggregate root id since it is going to be the partition key
+                                    // you can't batch across parititions, so the most optimal batches are via 
+                                    // grouped aggregates
+                                    .OrderBy(de => de.AggregateRootId)
+                                    .ThenBy(de => de.EventDate);
+
+            foreach (var domainEvent in sortedEvents)
             {
-                appSettings = new AppSettings();
-                testTableName = "TESTTABLE" + DateTime.Now.Millisecond.ToString(CultureInfo.InvariantCulture);
-                tableService = new AzureTableService(appSettings);
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-
-                sut = new TestableAzureTableEventStore(tableService);
-                sut.EventStoreTableName = testTableName;
-
-                var domainEvents = new List<DomainEvent>()
+                // Azure batches to chunk of 100, or under 4MB, and by the patition key (aggregate root id)
+                if (batchCount >= 100 ||
+                    batchSize >= 3900000 || // give ~10% buffer
+                    (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0))
                 {
-                    new DomainEvent1() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 5), Sequence = 99 },
-                    new DomainEvent2() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 7), Sequence = 100 },
-                    new DomainEvent3() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 9), Sequence = 101 },
-                    new DomainEvent1() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 11), Sequence = 102 },
-                    new DomainEvent2() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 13), Sequence = 103 },
-                    new DomainEvent3() { AggregateRootId = Guid.NewGuid(), EventDate = new DateTime(2016, 1, 15), Sequence = 104 },
-                };
-                sut.Insert(domainEvents);
-            };
+                    table.ExecuteBatch(batchOperation);
+                    batchOperation = new TableBatchOperation();
+                    batchCount = 0;
+                    batchSize = 0;
+                }
 
-            private Because of = () =>
+                var azureDomainEvent = new AzureDomainEvent(domainEvent);
+
+                batchSize += azureDomainEvent.EstimatedSize;
+                batchOperation.Insert(azureDomainEvent);
+                currentAggregateRootId = domainEvent.AggregateRootId;
+                batchCount++;
+            }
+
+            if (batchCount > 0)
+                table.ExecuteBatch(batchOperation);
+        }
+
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
+        {
+            return domainEventTypes.SelectMany(x =>
             {
-                results = sut.GetEventsByEventTypes(new[] { typeof(DomainEvent1), typeof(DomainEvent3) }, new DateTime(2016, 1, 6), new DateTime(2016, 1, 14));
-            };
+                var jsonDomainEventType = x.FullName;
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.EventType == jsonDomainEventType);
+                return ConvertToDomainEvent(domainEvents);
+            });
+        }
 
-            private It should_pull_back_only_matching_event_types_and_date = () =>
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
+        {
+            return domainEventTypes.SelectMany(x =>
             {
-                results.Count().ShouldEqual(2);                
-                results.Count(x => x.Sequence == 101).ShouldEqual(1);
-                results.Count(x => x.Sequence == 102).ShouldEqual(1);                
-            };
+                var partitionKey = aggregateRootId.ToString();
+                var jsonDomainEventType = x.FullName;
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
+                return ConvertToDomainEvent(domainEvents);
+            });
+        }
 
-            private Cleanup after = () =>
+        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
+        {
+            return domainEventTypes.SelectMany(x =>
             {
-                var table = tableService.GetTable(testTableName, false);
-                table.DeleteIfExists();
-            };
-
-            private static TestableAzureTableEventStore sut;
+                var jsonDomainEventType = x.FullName;
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
+                    .CreateQuery<AzureDomainEvent>()
+                    .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
+                return ConvertToDomainEvent(domainEvents);
+            });
         }
     }
-
-    public class DomainEvent1 : DomainEvent { }
-    public class DomainEvent2 : DomainEvent { }
-    public class DomainEvent3 : DomainEvent { }
-
-	public class TestableAzureTableEventStore : AzureTableEventStore
-	{
-		public TestableAzureTableEventStore(IAzureTableService tableService) : base(tableService, new DomainEntityTypeBuilder(), new Telemetry())
-		{ }
-
-		public string EventStoreTableName { get { return _eventStoreTableName; } set { _eventStoreTableName = value; } }
-	}
 }

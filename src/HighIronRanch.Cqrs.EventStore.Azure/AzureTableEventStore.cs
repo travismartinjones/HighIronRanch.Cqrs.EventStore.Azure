@@ -71,7 +71,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = _tableService.GetTable(_eventStoreTableName);
 
             var query = new TableQuery<AzureDomainEvent>()
                 .Where(TableQuery
@@ -93,7 +93,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         
         public void Insert(IEnumerable<DomainEvent> domainEvents)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = _tableService.GetTable(_eventStoreTableName);
 
             var batchOperation = new TableBatchOperation();
             var batchCount = 0;
@@ -134,7 +134,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var jsonDomainEventType = x.FullName;
-                var domainEvents =_tableService.GetTable(_eventStoreTableName, false)
+                var domainEvents =_tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType);
                 return ConvertToDomainEvent(domainEvents);
@@ -147,7 +147,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             {
                 var partitionKey = aggregateRootId.ToString();
                 var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
+                var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
                 return ConvertToDomainEvent(domainEvents);
@@ -159,7 +159,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
+                var domainEvents = _tableService.GetTable(_eventStoreTableName)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
                 return ConvertToDomainEvent(domainEvents);

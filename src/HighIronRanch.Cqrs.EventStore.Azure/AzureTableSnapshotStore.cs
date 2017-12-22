@@ -14,7 +14,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         protected readonly IAzureTableService _tableService;
         private readonly IDomainEntityTypeBuilder _domainEntityTypeBuilder;
         protected string _eventStoreTableName; // Used so it can be overridden for tests
-        
+
         public AzureTableSnapshotStore(
             IAzureTableService tableService,
             IDomainEntityTypeBuilder domainEntityTypeBuilder)
@@ -26,10 +26,10 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public Snapshot GetSnapshot(Guid aggregateRootId)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = _tableService.GetTable(_eventStoreTableName);
 
             var query = new TableQuery<AzureSnapshot>()
-                .Where(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal,aggregateRootId.ToString()));
+                .Where(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()));
 
             var azureSnapshot = table.ExecuteQuery(query).FirstOrDefault();
 
@@ -38,12 +38,12 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         public void SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);            
-            table.Execute(TableOperation.InsertOrReplace(new AzureSnapshot(snapshot)));            
+            var table = _tableService.GetTable(_eventStoreTableName);
+            table.Execute(TableOperation.InsertOrReplace(new AzureSnapshot(snapshot)));
         }
 
         public class AzureSnapshot : BsonPayloadTableEntity
-        {            
+        {
             protected override int AdditionalPropertySizes => 0;
 
             public AzureSnapshot() { }
@@ -51,7 +51,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             public AzureSnapshot(Snapshot snapshot)
             {
                 PartitionKey = snapshot.AggregateRootId.ToString();
-                RowKey = snapshot.GetType().FullName;                
+                RowKey = snapshot.GetType().FullName;
 
                 var snapshotData = snapshot.ToBson();
 
