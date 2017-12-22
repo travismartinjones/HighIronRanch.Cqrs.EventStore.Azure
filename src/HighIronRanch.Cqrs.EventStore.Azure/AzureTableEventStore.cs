@@ -8,7 +8,6 @@ using System.Text;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
 using SimpleCqrs.Eventing;
-using Microsoft.ApplicationInsights;
 
 namespace HighIronRanch.Cqrs.EventStore.Azure
 {
@@ -18,20 +17,17 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         public const string SEQUENCE_FORMAT_STRING = "0000000000";
 
         protected readonly IAzureTableService _tableService;
-        protected readonly ITelemetry _telemetry;
         private readonly IDomainEntityTypeBuilder _domainEntityTypeBuilder;
         protected string _eventStoreTableName; // Used so it can be overridden for tests
 
         public AzureTableEventStore(
             IAzureTableService tableService,
-            IDomainEntityTypeBuilder domainEntityTypeBuilder,
-            ITelemetry telemetry)
+            IDomainEntityTypeBuilder domainEntityTypeBuilder)
         {
             _tableService = tableService;
             _domainEntityTypeBuilder = domainEntityTypeBuilder;
             _eventStoreTableName = EVENT_STORE_TABLE_NAME;
-            _telemetry = telemetry;
-        }        
+        }
 
         /// <summary>This entity is basically a workaround the 64KB limitation
         /// for entity properties. 15 properties represents a total storage
@@ -48,30 +44,30 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             public DateTime EventDate { get; set; }
             public string EventType { get; set; }
             protected override int AdditionalPropertySizes => EventDateInIsoFormatSize + EventType.Length;
-            
+
             public AzureDomainEvent() { }
 
             public AzureDomainEvent(DomainEvent evt)
-            {   
+            {
                 PartitionKey = evt.AggregateRootId.ToString();
                 RowKey = evt.Sequence.ToString(SEQUENCE_FORMAT_STRING);
                 EventDate = evt.EventDate.ToUniversalTime();
                 EventType = evt.GetType().FullName;
-                              
+
                 var domainEventData = evt.ToBson();
-                
+
                 if (domainEventData.Length > MaxByteCapacity)
                 {
                     throw new ArgumentException($"Event size of {domainEventData.Length} when stored as json exceeds Azure property limit of 960K");
                 }
 
                 SetData(domainEventData);
-            }            
+            }
         }
 
         public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
         {
-            var table = _tableService.GetTable(_eventStoreTableName);
+            var table = _tableService.GetTable(_eventStoreTableName, false);
 
             var query = new TableQuery<AzureDomainEvent>()
                 .Where(TableQuery
@@ -90,10 +86,10 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             return events.Select(entity => entity.GetData().FromBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
         }
-        
+
         public void Insert(IEnumerable<DomainEvent> domainEvents)
         {
-            var table = _tableService.GetTable(_eventStoreTableName);
+            var table = _tableService.GetTable(_eventStoreTableName, false);
 
             var batchOperation = new TableBatchOperation();
             var batchCount = 0;
@@ -104,7 +100,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                                     // sort by the aggregate root id since it is going to be the partition key
                                     // you can't batch across parititions, so the most optimal batches are via 
                                     // grouped aggregates
-                                    .OrderBy(de => de.AggregateRootId)                                     
+                                    .OrderBy(de => de.AggregateRootId)
                                     .ThenBy(de => de.EventDate);
 
             foreach (var domainEvent in sortedEvents)
@@ -127,6 +123,9 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 currentAggregateRootId = domainEvent.AggregateRootId;
                 batchCount++;
             }
+
+            if (batchCount > 0)
+                table.ExecuteBatch(batchOperation);
         }
 
         public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
@@ -134,7 +133,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var jsonDomainEventType = x.FullName;
-                var domainEvents =_tableService.GetTable(_eventStoreTableName)
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType);
                 return ConvertToDomainEvent(domainEvents);
@@ -147,7 +146,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             {
                 var partitionKey = aggregateRootId.ToString();
                 var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName)
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
                 return ConvertToDomainEvent(domainEvents);
@@ -159,7 +158,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return domainEventTypes.SelectMany(x =>
             {
                 var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName)
+                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
                     .CreateQuery<AzureDomainEvent>()
                     .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
                 return ConvertToDomainEvent(domainEvents);
