@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
 using SimpleCqrs.Domain;
@@ -24,22 +26,35 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             _eventStoreTableName = EVENT_STORE_TABLE_NAME;
         }
 
-        public Snapshot GetSnapshot(Guid aggregateRootId)
+        public async Task<Snapshot> GetSnapshot(Guid aggregateRootId)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
 
             var query = new TableQuery<AzureSnapshot>()
                 .Where(TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()));
 
-            var azureSnapshot = table.ExecuteQuery(query).FirstOrDefault();
+            var snapshots = new List<AzureSnapshot>();
+            TableContinuationToken continuationToken = null;
+            do
+            {
+                var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                if (result.Results?.Count > 0)
+                {
+                    snapshots.AddRange(result.Results);
+                }
+
+                continuationToken = result.ContinuationToken;
+            } while (continuationToken != null);
+
+            var azureSnapshot = snapshots.FirstOrDefault();
 
             return azureSnapshot?.GetData().FromBson(_domainEntityTypeBuilder.Build(azureSnapshot.RowKey)) as Snapshot;
         }
 
-        public void SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
+        public async Task SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
-            table.Execute(TableOperation.InsertOrReplace(new AzureSnapshot(snapshot)));
+            var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
+            await table.ExecuteAsync(TableOperation.InsertOrReplace(new AzureSnapshot(snapshot))).ConfigureAwait(false);
         }
 
         public class AzureSnapshot : BsonPayloadTableEntity

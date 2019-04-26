@@ -101,12 +101,6 @@
     <None Include="app.config" />
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\HighIronRanch.Cqrs.EventStore.Azure\HighIronRanch.Cqrs.EventStore.Azure.csproj">
-      <Project>{a8337dcb-8503-478b-b11d-a71cdddc308b}</Project>
-      <Name>HighIronRanch.Cqrs.EventStore.Azure</Name>
-    </ProjectReference>
-  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.WindowsAzure.Storage.Table;
 using SimpleCqrs.Eventing;
@@ -65,9 +66,9 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             }
         }
 
-        public IEnumerable<DomainEvent> GetEvents(Guid aggregateRootId, int startSequence)
+        public async Task<IEnumerable<DomainEvent>> GetEvents(Guid aggregateRootId, int startSequence)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
 
             var query = new TableQuery<AzureDomainEvent>()
                 .Where(TableQuery
@@ -78,7 +79,20 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                     )
                 );
 
-            var ret = ConvertToDomainEvent(table.ExecuteQuery(query));
+            var results = new List<AzureDomainEvent>();
+            TableContinuationToken continuationToken = null;
+            do
+            {
+                var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                if (result.Results?.Count > 0)
+                {
+                    results.AddRange(result.Results);
+                }
+
+                continuationToken = result.ContinuationToken;
+            } while (continuationToken != null);
+
+            var ret = ConvertToDomainEvent(results);
             return ret;
         }
 
@@ -87,9 +101,9 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return events.Select(entity => entity.GetData().FromBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
         }
 
-        public void Insert(IEnumerable<DomainEvent> domainEvents)
+        public async Task Insert(IEnumerable<DomainEvent> domainEvents)
         {
-            var table = _tableService.GetTable(_eventStoreTableName, false);
+            var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
 
             var batchOperation = new TableBatchOperation();
             var batchCount = 0;
@@ -110,7 +124,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                     batchSize >= 3900000 || // give ~10% buffer
                     (currentAggregateRootId != domainEvent.AggregateRootId && batchCount > 0))
                 {
-                    table.ExecuteBatch(batchOperation);
+                    await table.ExecuteBatchAsync(batchOperation).ConfigureAwait(false);
                     batchOperation = new TableBatchOperation();
                     batchCount = 0;
                     batchSize = 0;
@@ -125,44 +139,112 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             }
 
             if (batchCount > 0)
-                table.ExecuteBatch(batchOperation);
+                await table.ExecuteBatchAsync(batchOperation).ConfigureAwait(false);
         }
 
-        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
+        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
         {
-            return domainEventTypes.SelectMany(x =>
+            var events = new List<DomainEvent>();
+            foreach (var domainEventType in domainEventTypes)
             {
-                var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
-                    .CreateQuery<AzureDomainEvent>()
-                    .Where(ade => ade.EventType == jsonDomainEventType);
-                return ConvertToDomainEvent(domainEvents);
-            });
+                var jsonDomainEventType = domainEventType.FullName;
+                var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
+
+                var query = new TableQuery<AzureDomainEvent>()
+                    .Where(TableQuery.GenerateFilterCondition("EventType", QueryComparisons.Equal, jsonDomainEventType));
+
+                var domainEvents = new List<AzureDomainEvent>();
+                TableContinuationToken continuationToken = null;
+                do
+                {
+                    var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                    if (result.Results?.Count > 0)
+                    {
+                        domainEvents.AddRange(result.Results);
+                    }
+
+                    continuationToken = result.ContinuationToken;
+                } while (continuationToken != null);
+                
+                events.AddRange(ConvertToDomainEvent(domainEvents));
+            }
+
+            return events;
         }
 
-        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
+        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId)
         {
-            return domainEventTypes.SelectMany(x =>
+            var partitionKey = aggregateRootId.ToString();
+            var events = new List<DomainEvent>();
+            foreach (var domainEventType in domainEventTypes)
             {
-                var partitionKey = aggregateRootId.ToString();
-                var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
-                    .CreateQuery<AzureDomainEvent>()
-                    .Where(ade => ade.PartitionKey == partitionKey && ade.EventType == jsonDomainEventType);
-                return ConvertToDomainEvent(domainEvents);
-            });
+                var jsonDomainEventType = domainEventType.FullName;
+                var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
+
+                var query = new TableQuery<AzureDomainEvent>()
+                    .Where(
+                        TableQuery.CombineFilters(
+                        TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, partitionKey),
+                        TableOperators.And,
+                        TableQuery.GenerateFilterCondition("EventType", QueryComparisons.Equal, jsonDomainEventType))
+                    );
+
+                var domainEvents = new List<AzureDomainEvent>();
+                TableContinuationToken continuationToken = null;
+                do
+                {
+                    var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                    if (result.Results?.Count > 0)
+                    {
+                        domainEvents.AddRange(result.Results);
+                    }
+
+                    continuationToken = result.ContinuationToken;
+                } while (continuationToken != null);
+                
+                events.AddRange(ConvertToDomainEvent(domainEvents));
+            }
+
+            return events;
         }
 
-        public IEnumerable<DomainEvent> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
         {
-            return domainEventTypes.SelectMany(x =>
+            var events = new List<DomainEvent>();
+            foreach (var domainEventType in domainEventTypes)
             {
-                var jsonDomainEventType = x.FullName;
-                var domainEvents = _tableService.GetTable(_eventStoreTableName, false)
-                    .CreateQuery<AzureDomainEvent>()
-                    .Where(ade => ade.EventType == jsonDomainEventType && ade.EventDate >= startDate && ade.EventDate <= endDate);
-                return ConvertToDomainEvent(domainEvents);
-            });
+                var jsonDomainEventType = domainEventType.FullName;
+                var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
+
+                var query = new TableQuery<AzureDomainEvent>()
+                    .Where(
+                        TableQuery.CombineFilters(
+                            TableQuery.GenerateFilterCondition("EventType", QueryComparisons.Equal, jsonDomainEventType),
+                            TableOperators.And,
+                            TableQuery.CombineFilters(
+                                TableQuery.GenerateFilterCondition("EventDate", QueryComparisons.GreaterThanOrEqual, startDate.ToString("O")),
+                                TableOperators.And,
+                                TableQuery.GenerateFilterCondition("EventDate", QueryComparisons.LessThanOrEqual, endDate.ToString("O"))
+                            ))
+                    );
+
+                var domainEvents = new List<AzureDomainEvent>();
+                TableContinuationToken continuationToken = null;
+                do
+                {
+                    var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                    if (result.Results?.Count > 0)
+                    {
+                        domainEvents.AddRange(result.Results);
+                    }
+
+                    continuationToken = result.ContinuationToken;
+                } while (continuationToken != null);
+                
+                events.AddRange(ConvertToDomainEvent(domainEvents));
+            }
+
+            return events;
         }
     }
 }
