@@ -11,7 +11,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             using (var ms = new MemoryStream())
             { 
-                using (var writer = new BsonWriter(ms))
+                using (var writer = new BsonDataWriter(ms))
                 {
                     var serializer = new JsonSerializer {DateTimeZoneHandling = DateTimeZoneHandling.Utc};
                     serializer.Serialize(writer, entity);
@@ -25,7 +25,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         {
             using (var ms = new MemoryStream(bson))
             {
-                using (var reader = new BsonReader(ms))
+                using (var reader = new BsonDataReader(ms))
                 {
                     var serializer = new JsonSerializer { DateTimeZoneHandling = DateTimeZoneHandling.Utc };
                     return serializer.Deserialize(reader, type);
