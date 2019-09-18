@@ -55,7 +55,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 EventDate = evt.EventDate.ToUniversalTime();
                 EventType = evt.GetType().FullName;
 
-                var domainEventData = evt.ToBson();
+                var domainEventData = evt.ToTableBson();
 
                 if (domainEventData.Length > MaxByteCapacity)
                 {
@@ -98,7 +98,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
         private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
-            return events.Select(entity => entity.GetData().FromBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
+            return events.Select(entity => entity.GetData().FromTableBson(_domainEntityTypeBuilder.Build(entity.EventType)) as DomainEvent);
         }
 
         public async Task Insert(IEnumerable<DomainEvent> domainEvents)

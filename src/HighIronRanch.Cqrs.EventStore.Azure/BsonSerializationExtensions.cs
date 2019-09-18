@@ -7,7 +7,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 {
     public static class BsonSerializationExtensions
     {
-        public static byte[] ToBson(this object entity)
+        public static byte[] ToTableBson(this object entity)
         {
             using (var ms = new MemoryStream())
             { 
@@ -21,7 +21,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             }
     }
 
-        public static object FromBson(this byte[] bson, Type type)
+        public static object FromTableBson(this byte[] bson, Type type)
         {
             using (var ms = new MemoryStream(bson))
             {
@@ -33,9 +33,9 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             }
         }
 
-        public static T FromBson<T>(this byte[] bson)
+        public static T FromTableBson<T>(this byte[] bson)
         {
-            return (T)FromBson(bson, typeof (T));
+            return (T)FromTableBson(bson, typeof (T));
         }
     }
 }

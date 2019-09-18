@@ -48,7 +48,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
 
             var azureSnapshot = snapshots.FirstOrDefault();
 
-            return azureSnapshot?.GetData().FromBson(_domainEntityTypeBuilder.Build(azureSnapshot.RowKey)) as Snapshot;
+            return azureSnapshot?.GetData().FromTableBson(_domainEntityTypeBuilder.Build(azureSnapshot.RowKey)) as Snapshot;
         }
 
         public async Task SaveSnapshot<TSnapshot>(TSnapshot snapshot) where TSnapshot : Snapshot
@@ -68,7 +68,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
                 PartitionKey = snapshot.AggregateRootId.ToString();
                 RowKey = snapshot.GetType().FullName;
 
-                var snapshotData = snapshot.ToBson();
+                var snapshotData = snapshot.ToTableBson();
 
                 if (snapshotData.Length > MaxByteCapacity)
                 {
