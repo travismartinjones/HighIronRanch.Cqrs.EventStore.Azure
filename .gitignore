@@ -186,3 +186,4 @@ src/.vs/HighIronRanch.Cqrs.EventStore.Azure/v15/Server/sqlite3/storage.ide-shm
 src/.vs/HighIronRanch.Cqrs.EventStore.Azure/v15/Server/sqlite3/storage.ide
 src/.vs/HighIronRanch.Cqrs.EventStore.Azure/v15/Server/sqlite3/db.lock
 src/HighIronRanch.Cqrs.EventStore.Azure/publish-nuget.bat
+src/.vs/
