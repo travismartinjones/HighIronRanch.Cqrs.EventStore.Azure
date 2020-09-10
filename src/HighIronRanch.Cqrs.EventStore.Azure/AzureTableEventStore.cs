@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using HighIronRanch.Azure.TableStorage;
 using Microsoft.Azure.Cosmos.Table;
+using SimpleCqrs.Domain;
 using SimpleCqrs.Eventing;
 
 namespace HighIronRanch.Cqrs.EventStore.Azure
@@ -42,7 +43,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
         public class AzureDomainEvent : BsonPayloadTableEntity
         {
             private const int EventDateInIsoFormatSize = 25;
-            public DateTime EventDate { get; set; }
+            public System.DateTime EventDate { get; set; }
             public string EventType { get; set; }
             protected override int AdditionalPropertySizes => EventDateInIsoFormatSize + EventType.Length;
 
@@ -95,6 +96,36 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             var ret = ConvertToDomainEvent(results);
             return ret;
         }
+        
+        public async Task<DomainEvent> GetEvent(Guid aggregateRootId, int sequenceId)
+        {
+            var table = await _tableService.GetTable(_eventStoreTableName, false).ConfigureAwait(false);
+
+            var query = new TableQuery<AzureDomainEvent>()
+                .Where(TableQuery
+                    .CombineFilters(
+                        TableQuery.GenerateFilterCondition("PartitionKey", QueryComparisons.Equal, aggregateRootId.ToString()),
+                        TableOperators.And,
+                        TableQuery.GenerateFilterCondition("RowKey", QueryComparisons.Equal, sequenceId.ToString(SEQUENCE_FORMAT_STRING))
+                    )
+                );
+
+            var results = new List<AzureDomainEvent>();
+            TableContinuationToken continuationToken = null;
+            do
+            {
+                var result = await table.ExecuteQuerySegmentedAsync(query, continuationToken).ConfigureAwait(false);
+                if (result.Results?.Count > 0)
+                {
+                    results.AddRange(result.Results);
+                }
+
+                continuationToken = result.ContinuationToken;
+            } while (continuationToken != null);
+
+            var ret = ConvertToDomainEvent(results);
+            return ret.FirstOrDefault();
+        }
 
         private IEnumerable<DomainEvent> ConvertToDomainEvent(IEnumerable<AzureDomainEvent> events)
         {
@@ -141,7 +172,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             if (batchCount > 0)
                 await table.ExecuteBatchAsync(batchOperation).ConfigureAwait(false);
         }
-
+        
         public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes)
         {
             var events = new List<DomainEvent>();
@@ -208,7 +239,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return events;
         }
 
-        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, Guid aggregateRootId, System.DateTime startDate, System.DateTime endDate)
         {
             var partitionKey = aggregateRootId.ToString();
             var events = new List<DomainEvent>();
@@ -251,7 +282,7 @@ namespace HighIronRanch.Cqrs.EventStore.Azure
             return events;
         }
 
-        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, DateTime startDate, DateTime endDate)
+        public async Task<IEnumerable<DomainEvent>> GetEventsByEventTypes(IEnumerable<Type> domainEventTypes, System.DateTime startDate, System.DateTime endDate)
         {
             var events = new List<DomainEvent>();
             foreach (var domainEventType in domainEventTypes)
